@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Nifty Options Lakehouse — Gold Layer</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root{
+    --bg:#0B0F14; --panel:#121821; --panel-line:#1E2733;
+    --ink:#E7ECF2; --ink-dim:#8B98A8;
+    --call:#E8A857; --put:#4FC9C0;
+    --up:#4FC98C; --down:#E8677A;
+    --mono:'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+    --sans:'Inter', -apple-system, sans-serif;
+  }
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+  *{box-sizing:border-box; margin:0; padding:0;}
+  body{
+    background:var(--bg); color:var(--ink); font-family:var(--sans);
+    padding:32px clamp(16px,4vw,56px) 64px; min-height:100vh;
+  }
+  header{
+    display:flex; justify-content:space-between; align-items:flex-end;
+    border-bottom:1px solid var(--panel-line); padding-bottom:20px; margin-bottom:28px;
+    flex-wrap:wrap; gap:16px;
+  }
+  .eyebrow{ font-family:var(--mono); font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--ink-dim); margin-bottom:6px;}
+  h1{ font-size:26px; font-weight:600; letter-spacing:-0.01em;}
+  .asof{ font-family:var(--mono); font-size:12px; color:var(--ink-dim); text-align:right;}
+  .asof b{ color:var(--ink); font-weight:500;}
+
+  .stat-row{ display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:1px; background:var(--panel-line); border:1px solid var(--panel-line); margin-bottom:28px; }
+  .stat{ background:var(--panel); padding:16px 18px; }
+  .stat .label{ font-family:var(--mono); font-size:10px; letter-spacing:.1em; text-transform:uppercase; color:var(--ink-dim); margin-bottom:8px;}
+  .stat .value{ font-family:var(--mono); font-size:24px; font-weight:600; }
+  .stat .sub{ font-family:var(--mono); font-size:11px; color:var(--ink-dim); margin-top:4px;}
+  .pos{ color:var(--up);} .neg{ color:var(--down);}
+
+  .grid{ display:grid; grid-template-columns:1.3fr 1fr; gap:20px; margin-bottom:20px;}
+  @media(max-width:900px){ .grid{grid-template-columns:1fr;} }
+  .panel{ background:var(--panel); border:1px solid var(--panel-line); padding:20px 20px 8px;}
+  .panel h2{ font-size:13px; font-weight:600; margin-bottom:2px;}
+  .panel .desc{ font-family:var(--mono); font-size:11px; color:var(--ink-dim); margin-bottom:16px;}
+  .chart-wrap{ position:relative; height:260px; }
+
+  .legend{ display:flex; gap:18px; font-family:var(--mono); font-size:11px; color:var(--ink-dim); margin-top:10px; padding-bottom:14px;}
+  .legend span::before{ content:''; display:inline-block; width:9px; height:9px; margin-right:6px; border-radius:2px; vertical-align:middle;}
+  .dot-call::before{ background:var(--call);} .dot-put::before{ background:var(--put);}
+
+  .buildup-panel{ grid-column:1/-1; }
+  table{ width:100%; border-collapse:collapse; font-family:var(--mono); font-size:12px;}
+  th{ text-align:left; padding:8px 10px; color:var(--ink-dim); font-weight:500; font-size:10px; text-transform:uppercase; letter-spacing:.08em; border-bottom:1px solid var(--panel-line);}
+  td{ padding:7px 10px; border-bottom:1px solid #171E28;}
+  .badge{ display:inline-block; padding:2px 8px; border-radius:3px; font-size:11px; font-weight:500;}
+  .b-long-buildup{ background:rgba(79,201,140,.15); color:var(--up);}
+  .b-short-buildup{ background:rgba(232,103,122,.15); color:var(--down);}
+  .b-long-unwinding{ background:rgba(139,152,168,.15); color:var(--ink-dim);}
+  .b-short-covering{ background:rgba(79,201,192,.15); color:var(--put);}
+
+  footer{ margin-top:32px; font-family:var(--mono); font-size:10.5px; color:#5A6472; border-top:1px solid var(--panel-line); padding-top:14px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <div class="eyebrow">Nifty Options Lakehouse · Gold Layer</div>
+    <h1>Intraday Signal Dashboard</h1>
+  </div>
+  <div class="asof">Latest snapshot<br><b id="asof-ts">—</b></div>
+</header>
+
+<div class="stat-row" id="stat-row"></div>
+
+<div class="grid">
+  <div class="panel">
+    <h2>Underlying vs. Max Pain</h2>
+    <div class="desc">Spot price through the day against the computed max-pain strike</div>
+    <div class="chart-wrap"><canvas id="spotChart"></canvas></div>
+  </div>
+  <div class="panel">
+    <h2>PCR &amp; Skew Trend</h2>
+    <div class="desc">OI put/call ratio and OTM put-call IV skew (pts) across the day</div>
+    <div class="chart-wrap"><canvas id="pcrChart"></canvas></div>
+  </div>
+</div>
+
+<div class="panel buildup-panel">
+  <h2>OI Buildup — Latest Snapshot</h2>
+  <div class="desc">Per-strike classification vs. prior snapshot: where fresh positioning is entering</div>
+  <div class="legend">
+    <span class="dot-call">CE = Call</span>
+    <span class="dot-put">PE = Put</span>
+  </div>
+  <table>
+    <thead><tr><th>Strike</th><th>Type</th><th>OI</th><th>Classification</th></tr></thead>
+    <tbody id="buildup-body"></tbody>
+  </table>
+</div>
+
+<footer>
+  Data: synthetic demo snapshots generated to match NSE option-chain API shape · Pipeline: bronze → silver (Delta Lake) → gold (this view) · Not investment advice.
+</footer>
+
+<script>
+const metrics = [{"snapshot_ts": "2026-08-05 09:20:00", "underlying_value": 24767.68, "pcr": 0.99, "max_pain": 24750.0, "distance_to_max_pain_pct": 0.071, "put_iv_otm": 12.66, "call_iv_otm": 13.34, "skew_pts": -0.68, "symbol": "NIFTY", "trading_date": "2026-08-05"}, {"snapshot_ts": "2026-08-05 10:15:00", "underlying_value": 24788.94, "pcr": 0.999, "max_pain": 24800.0, "distance_to_max_pain_pct": -0.045, "put_iv_otm": 12.66, "call_iv_otm": 13.34, "skew_pts": -0.67, "symbol": "NIFTY", "trading_date": "2026-08-05"}, {"snapshot_ts": "2026-08-05 11:30:00", "underlying_value": 24824.85, "pcr": 1.013, "max_pain": 24800.0, "distance_to_max_pain_pct": 0.1, "put_iv_otm": 12.65, "call_iv_otm": 13.34, "skew_pts": -0.69, "symbol": "NIFTY", "trading_date": "2026-08-05"}, {"snapshot_ts": "2026-08-05 13:00:00", "underlying_value": 24796.94, "pcr": 1.007, "max_pain": 24800.0, "distance_to_max_pain_pct": -0.012, "put_iv_otm": 12.67, "call_iv_otm": 13.34, "skew_pts": -0.67, "symbol": "NIFTY", "trading_date": "2026-08-05"}, {"snapshot_ts": "2026-08-05 14:15:00", "underlying_value": 24882.95, "pcr": 1.092, "max_pain": 24850.0, "distance_to_max_pain_pct": 0.133, "put_iv_otm": 12.66, "call_iv_otm": 13.34, "skew_pts": -0.67, "symbol": "NIFTY", "trading_date": "2026-08-05"}, {"snapshot_ts": "2026-08-05 15:15:00", "underlying_value": 24904.61, "pcr": 1.071, "max_pain": 24850.0, "distance_to_max_pain_pct": 0.22, "put_iv_otm": 12.67, "call_iv_otm": 13.34, "skew_pts": -0.67, "symbol": "NIFTY", "trading_date": "2026-08-05"}, {"snapshot_ts": "2026-08-06 09:20:00", "underlying_value": 24931.14, "pcr": 1.027, "max_pain": 24950.0, "distance_to_max_pain_pct": -0.076, "put_iv_otm": 13.11, "call_iv_otm": 12.89, "skew_pts": 0.22, "symbol": "NIFTY", "trading_date": "2026-08-06"}, {"snapshot_ts": "2026-08-06 10:15:00", "underlying_value": 25075.89, "pcr": 0.986, "max_pain": 25050.0, "distance_to_max_pain_pct": 0.103, "put_iv_otm": 13.11, "call_iv_otm": 12.89, "skew_pts": 0.22, "symbol": "NIFTY", "trading_date": "2026-08-06"}, {"snapshot_ts": "2026-08-06 11:30:00", "underlying_value": 25046.03, "pcr": 0.964, "max_pain": 25000.0, "distance_to_max_pain_pct": 0.184, "put_iv_otm": 13.11, "call_iv_otm": 12.89, "skew_pts": 0.22, "symbol": "NIFTY", "trading_date": "2026-08-06"}, {"snapshot_ts": "2026-08-06 13:00:00", "underlying_value": 25016.98, "pcr": 1.015, "max_pain": 25000.0, "distance_to_max_pain_pct": 0.068, "put_iv_otm": 13.12, "call_iv_otm": 12.9, "skew_pts": 0.22, "symbol": "NIFTY", "trading_date": "2026-08-06"}, {"snapshot_ts": "2026-08-06 14:15:00", "underlying_value": 24828.37, "pcr": 1.086, "max_pain": 24950.0, "distance_to_max_pain_pct": -0.487, "put_iv_otm": 13.11, "call_iv_otm": 12.89, "skew_pts": 0.22, "symbol": "NIFTY", "trading_date": "2026-08-06"}, {"snapshot_ts": "2026-08-06 15:15:00", "underlying_value": 24780.33, "pcr": 1.105, "max_pain": 24900.0, "distance_to_max_pain_pct": -0.481, "put_iv_otm": 13.11, "call_iv_otm": 12.89, "skew_pts": 0.22, "symbol": "NIFTY", "trading_date": "2026-08-06"}, {"snapshot_ts": "2026-08-07 09:20:00", "underlying_value": 24752.75, "pcr": 0.984, "max_pain": 24750.0, "distance_to_max_pain_pct": 0.011, "put_iv_otm": 12.67, "call_iv_otm": 13.33, "skew_pts": -0.66, "symbol": "NIFTY", "trading_date": "2026-08-07"}, {"snapshot_ts": "2026-08-07 10:15:00", "underlying_value": 24813.82, "pcr": 0.972, "max_pain": 24750.0, "distance_to_max_pain_pct": 0.258, "put_iv_otm": 12.66, "call_iv_otm": 13.34, "skew_pts": -0.69, "symbol": "NIFTY", "trading_date": "2026-08-07"}, {"snapshot_ts": "2026-08-07 11:30:00", "underlying_value": 24782.13, "pcr": 0.987, "max_pain": 24750.0, "distance_to_max_pain_pct": 0.13, "put_iv_otm": 12.66, "call_iv_otm": 13.35, "skew_pts": -0.69, "symbol": "NIFTY", "trading_date": "2026-08-07"}, {"snapshot_ts": "2026-08-07 13:00:00", "underlying_value": 24820.89, "pcr": 0.977, "max_pain": 24750.0, "distance_to_max_pain_pct": 0.286, "put_iv_otm": 12.66, "call_iv_otm": 13.34, "skew_pts": -0.68, "symbol": "NIFTY", "trading_date": "2026-08-07"}, {"snapshot_ts": "2026-08-07 14:15:00", "underlying_value": 24875.59, "pcr": 1.003, "max_pain": 24850.0, "distance_to_max_pain_pct": 0.103, "put_iv_otm": 12.67, "call_iv_otm": 13.35, "skew_pts": -0.68, "symbol": "NIFTY", "trading_date": "2026-08-07"}, {"snapshot_ts": "2026-08-07 15:15:00", "underlying_value": 24916.53, "pcr": 1.006, "max_pain": 24850.0, "distance_to_max_pain_pct": 0.268, "put_iv_otm": 12.66, "call_iv_otm": 13.34, "skew_pts": -0.68, "symbol": "NIFTY", "trading_date": "2026-08-07"}, {"snapshot_ts": "2026-08-08 09:20:00", "underlying_value": 24885.99, "pcr": 1.054, "max_pain": 24950.0, "distance_to_max_pain_pct": -0.257, "put_iv_otm": 13.11, "call_iv_otm": 12.89, "skew_pts": 0.22, "symbol": "NIFTY", "trading_date": "2026-08-08"}, {"snapshot_ts": "2026-08-08 10:15:00", "underlying_value": 24938.12, "pcr": 1.059, "max_pain": 25000.0, "distance_to_max_pain_pct": -0.248, "put_iv_otm": 13.11, "call_iv_otm": 12.89, "skew_pts": 0.22, "symbol": "NIFTY", "trading_date": "2026-08-08"}, {"snapshot_ts": "2026-08-08 11:30:00", "underlying_value": 24953.36, "pcr": 1.064, "max_pain": 25000.0, "distance_to_max_pain_pct": -0.187, "put_iv_otm": 13.11, "call_iv_otm": 12.89, "skew_pts": 0.22, "symbol": "NIFTY", "trading_date": "2026-08-08"}, {"snapshot_ts": "2026-08-08 13:00:00", "underlying_value": 24911.62, "pcr": 1.028, "max_pain": 24950.0, "distance_to_max_pain_pct": -0.154, "put_iv_otm": 13.11, "call_iv_otm": 12.89, "skew_pts": 0.23, "symbol": "NIFTY", "trading_date": "2026-08-08"}, {"snapshot_ts": "2026-08-08 14:15:00", "underlying_value": 24937.93, "pcr": 1.047, "max_pain": 25000.0, "distance_to_max_pain_pct": -0.248, "put_iv_otm": 13.11, "call_iv_otm": 12.89, "skew_pts": 0.22, "symbol": "NIFTY", "trading_date": "2026-08-08"}, {"snapshot_ts": "2026-08-08 15:15:00", "underlying_value": 24914.61, "pcr": 1.062, "max_pain": 24950.0, "distance_to_max_pain_pct": -0.142, "put_iv_otm": 13.12, "call_iv_otm": 12.89, "skew_pts": 0.23, "symbol": "NIFTY", "trading_date": "2026-08-08"}, {"snapshot_ts": "2026-08-09 09:20:00", "underlying_value": 24946.52, "pcr": 0.777, "max_pain": 24900.0, "distance_to_max_pain_pct": 0.187, "put_iv_otm": 12.66, "call_iv_otm": 13.33, "skew_pts": -0.68, "symbol": "NIFTY", "trading_date": "2026-08-09"}, {"snapshot_ts": "2026-08-09 10:15:00", "underlying_value": 25070.14, "pcr": 0.78, "max_pain": 24950.0, "distance_to_max_pain_pct": 0.482, "put_iv_otm": 12.66, "call_iv_otm": 13.34, "skew_pts": -0.68, "symbol": "NIFTY", "trading_date": "2026-08-09"}, {"snapshot_ts": "2026-08-09 11:30:00", "underlying_value": 25104.46, "pcr": 0.779, "max_pain": 24950.0, "distance_to_max_pain_pct": 0.619, "put_iv_otm": 12.67, "call_iv_otm": 13.34, "skew_pts": -0.67, "symbol": "NIFTY", "trading_date": "2026-08-09"}, {"snapshot_ts": "2026-08-09 13:00:00", "underlying_value": 25100.34, "pcr": 0.787, "max_pain": 25000.0, "distance_to_max_pain_pct": 0.401, "put_iv_otm": 12.66, "call_iv_otm": 13.34, "skew_pts": -0.69, "symbol": "NIFTY", "trading_date": "2026-08-09"}, {"snapshot_ts": "2026-08-09 14:15:00", "underlying_value": 25106.13, "pcr": 0.776, "max_pain": 25000.0, "distance_to_max_pain_pct": 0.425, "put_iv_otm": 12.67, "call_iv_otm": 13.34, "skew_pts": -0.67, "symbol": "NIFTY", "trading_date": "2026-08-09"}, {"snapshot_ts": "2026-08-09 15:15:00", "underlying_value": 25206.96, "pcr": 0.767, "max_pain": 25000.0, "distance_to_max_pain_pct": 0.828, "put_iv_otm": 12.67, "call_iv_otm": 13.34, "skew_pts": -0.67, "symbol": "NIFTY", "trading_date": "2026-08-09"}, {"snapshot_ts": "2026-08-10 09:20:00", "underlying_value": 25166.83, "pcr": 1.097, "max_pain": 25250.0, "distance_to_max_pain_pct": -0.329, "put_iv_otm": 13.11, "call_iv_otm": 12.9, "skew_pts": 0.21, "symbol": "NIFTY", "trading_date": "2026-08-10"}, {"snapshot_ts": "2026-08-10 10:15:00", "underlying_value": 25195.99, "pcr": 1.104, "max_pain": 25250.0, "distance_to_max_pain_pct": -0.214, "put_iv_otm": 13.11, "call_iv_otm": 12.89, "skew_pts": 0.22, "symbol": "NIFTY", "trading_date": "2026-08-10"}, {"snapshot_ts": "2026-08-10 11:30:00", "underlying_value": 25169.7, "pcr": 1.083, "max_pain": 25250.0, "distance_to_max_pain_pct": -0.318, "put_iv_otm": 13.12, "call_iv_otm": 12.9, "skew_pts": 0.22, "symbol": "NIFTY", "trading_date": "2026-08-10"}, {"snapshot_ts": "2026-08-10 13:00:00", "underlying_value": 25125.94, "pcr": 1.093, "max_pain": 25250.0, "distance_to_max_pain_pct": -0.491, "put_iv_otm": 13.11, "call_iv_otm": 12.89, "skew_pts": 0.22, "symbol": "NIFTY", "trading_date": "2026-08-10"}, {"snapshot_ts": "2026-08-10 14:15:00", "underlying_value": 25109.73, "pcr": 1.063, "max_pain": 25200.0, "distance_to_max_pain_pct": -0.358, "put_iv_otm": 13.11, "call_iv_otm": 12.89, "skew_pts": 0.22, "symbol": "NIFTY", "trading_date": "2026-08-10"}, {"snapshot_ts": "2026-08-10 15:15:00", "underlying_value": 25130.95, "pcr": 1.088, "max_pain": 25250.0, "distance_to_max_pain_pct": -0.471, "put_iv_otm": 13.11, "call_iv_otm": 12.89, "skew_pts": 0.22, "symbol": "NIFTY", "trading_date": "2026-08-10"}, {"snapshot_ts": "2026-08-11 09:20:00", "underlying_value": 25180.81, "pcr": 1.001, "max_pain": 25150.0, "distance_to_max_pain_pct": 0.123, "put_iv_otm": 13.11, "call_iv_otm": 12.89, "skew_pts": 0.22, "symbol": "NIFTY", "trading_date": "2026-08-11"}, {"snapshot_ts": "2026-08-11 10:15:00", "underlying_value": 25222.65, "pcr": 1.014, "max_pain": 25150.0, "distance_to_max_pain_pct": 0.289, "put_iv_otm": 13.12, "call_iv_otm": 12.9, "skew_pts": 0.22, "symbol": "NIFTY", "trading_date": "2026-08-11"}, {"snapshot_ts": "2026-08-11 11:30:00", "underlying_value": 25143.76, "pcr": 0.981, "max_pain": 25100.0, "distance_to_max_pain_pct": 0.174, "put_iv_otm": 13.11, "call_iv_otm": 12.89, "skew_pts": 0.22, "symbol": "NIFTY", "trading_date": "2026-08-11"}, {"snapshot_ts": "2026-08-11 13:00:00", "underlying_value": 25194.68, "pcr": 0.995, "max_pain": 25150.0, "distance_to_max_pain_pct": 0.178, "put_iv_otm": 13.11, "call_iv_otm": 12.89, "skew_pts": 0.22, "symbol": "NIFTY", "trading_date": "2026-08-11"}, {"snapshot_ts": "2026-08-11 14:15:00", "underlying_value": 25153.73, "pcr": 0.982, "max_pain": 25100.0, "distance_to_max_pain_pct": 0.214, "put_iv_otm": 13.11, "call_iv_otm": 12.89, "skew_pts": 0.22, "symbol": "NIFTY", "trading_date": "2026-08-11"}, {"snapshot_ts": "2026-08-11 15:15:00", "underlying_value": 25170.34, "pcr": 1.0, "max_pain": 25150.0, "distance_to_max_pain_pct": 0.081, "put_iv_otm": 13.12, "call_iv_otm": 12.9, "skew_pts": 0.22, "symbol": "NIFTY", "trading_date": "2026-08-11"}, {"snapshot_ts": "2026-08-12 09:20:00", "underlying_value": 25212.8, "pcr": 0.81, "max_pain": 25100.0, "distance_to_max_pain_pct": 0.449, "put_iv_otm": 12.67, "call_iv_otm": 13.34, "skew_pts": -0.66, "symbol": "NIFTY", "trading_date": "2026-08-12"}, {"snapshot_ts": "2026-08-12 10:15:00", "underlying_value": 25254.62, "pcr": 0.81, "max_pain": 25100.0, "distance_to_max_pain_pct": 0.616, "put_iv_otm": 12.66, "call_iv_otm": 13.34, "skew_pts": -0.69, "symbol": "NIFTY", "trading_date": "2026-08-12"}, {"snapshot_ts": "2026-08-12 11:30:00", "underlying_value": 25344.22, "pcr": 0.803, "max_pain": 25250.0, "distance_to_max_pain_pct": 0.373, "put_iv_otm": 12.66, "call_iv_otm": 13.34, "skew_pts": -0.68, "symbol": "NIFTY", "trading_date": "2026-08-12"}, {"snapshot_ts": "2026-08-12 13:00:00", "underlying_value": 25397.2, "pcr": 0.816, "max_pain": 25300.0, "distance_to_max_pain_pct": 0.384, "put_iv_otm": 12.66, "call_iv_otm": 13.34, "skew_pts": -0.68, "symbol": "NIFTY", "trading_date": "2026-08-12"}, {"snapshot_ts": "2026-08-12 14:15:00", "underlying_value": 25446.6, "pcr": 0.837, "max_pain": 25350.0, "distance_to_max_pain_pct": 0.381, "put_iv_otm": 12.66, "call_iv_otm": 13.34, "skew_pts": -0.68, "symbol": "NIFTY", "trading_date": "2026-08-12"}, {"snapshot_ts": "2026-08-12 15:15:00", "underlying_value": 25546.02, "pcr": 0.908, "max_pain": 25450.0, "distance_to_max_pain_pct": 0.377, "put_iv_otm": 12.66, "call_iv_otm": 13.34, "skew_pts": -0.68, "symbol": "NIFTY", "trading_date": "2026-08-12"}];
+const buildup = [{"strike_price": 24950.0, "option_type": "CE", "open_interest": 1142250, "classification": "Short Covering", "symbol": "NIFTY", "snapshot_ts": "2026-08-12 15:15:00", "trading_date": "2026-08-12"}, {"strike_price": 24950.0, "option_type": "PE", "open_interest": 921299, "classification": "Short Buildup", "symbol": "NIFTY", "snapshot_ts": "2026-08-12 15:15:00", "trading_date": "2026-08-12"}, {"strike_price": 25000.0, "option_type": "CE", "open_interest": 706011, "classification": "Short Covering", "symbol": "NIFTY", "snapshot_ts": "2026-08-12 15:15:00", "trading_date": "2026-08-12"}, {"strike_price": 25000.0, "option_type": "PE", "open_interest": 1758029, "classification": "Short Buildup", "symbol": "NIFTY", "snapshot_ts": "2026-08-12 15:15:00", "trading_date": "2026-08-12"}, {"strike_price": 25050.0, "option_type": "CE", "open_interest": 1075097, "classification": "Long Buildup", "symbol": "NIFTY", "snapshot_ts": "2026-08-12 15:15:00", "trading_date": "2026-08-12"}, {"strike_price": 25050.0, "option_type": "PE", "open_interest": 782093, "classification": "Short Buildup", "symbol": "NIFTY", "snapshot_ts": "2026-08-12 15:15:00", "trading_date": "2026-08-12"}, {"strike_price": 25100.0, "option_type": "CE", "open_interest": 1673733, "classification": "Short Covering", "symbol": "NIFTY", "snapshot_ts": "2026-08-12 15:15:00", "trading_date": "2026-08-12"}, {"strike_price": 25100.0, "option_type": "PE", "open_interest": 944323, "classification": "Long Unwinding", "symbol": "NIFTY", "snapshot_ts": "2026-08-12 15:15:00", "trading_date": "2026-08-12"}, {"strike_price": 25150.0, "option_type": "CE", "open_interest": 1105578, "classification": "Long Buildup", "symbol": "NIFTY", "snapshot_ts": "2026-08-12 15:15:00", "trading_date": "2026-08-12"}, {"strike_price": 25150.0, "option_type": "PE", "open_interest": 914565, "classification": "Long Unwinding", "symbol": "NIFTY", "snapshot_ts": "2026-08-12 15:15:00", "trading_date": "2026-08-12"}, {"strike_price": 25200.0, "option_type": "CE", "open_interest": 595160, "classification": "Long Buildup", "symbol": "NIFTY", "snapshot_ts": "2026-08-12 15:15:00", "trading_date": "2026-08-12"}, {"strike_price": 25200.0, "option_type": "PE", "open_interest": 609008, "classification": "Long Unwinding", "symbol": "NIFTY", "snapshot_ts": "2026-08-12 15:15:00", "trading_date": "2026-08-12"}, {"strike_price": 25250.0, "option_type": "CE", "open_interest": 795875, "classification": "Long Buildup", "symbol": "NIFTY", "snapshot_ts": "2026-08-12 15:15:00", "trading_date": "2026-08-12"}, {"strike_price": 25250.0, "option_type": "PE", "open_interest": 576834, "classification": "Short Buildup", "symbol": "NIFTY", "snapshot_ts": "2026-08-12 15:15:00", "trading_date": "2026-08-12"}, {"strike_price": 25300.0, "option_type": "CE", "open_interest": 1561225, "classification": "Long Buildup", "symbol": "NIFTY", "snapshot_ts": "2026-08-12 15:15:00", "trading_date": "2026-08-12"}, {"strike_price": 25300.0, "option_type": "PE", "open_interest": 957965, "classification": "Short Buildup", "symbol": "NIFTY", "snapshot_ts": "2026-08-12 15:15:00", "trading_date": "2026-08-12"}, {"strike_price": 25350.0, "option_type": "CE", "open_interest": 852672, "classification": "Short Covering", "symbol": "NIFTY", "snapshot_ts": "2026-08-12 15:15:00", "trading_date": "2026-08-12"}, {"strike_price": 25350.0, "option_type": "PE", "open_interest": 1752370, "classification": "Long Unwinding", "symbol": "NIFTY", "snapshot_ts": "2026-08-12 15:15:00", "trading_date": "2026-08-12"}, {"strike_price": 25400.0, "option_type": "CE", "open_interest": 999146, "classification": "Short Covering", "symbol": "NIFTY", "snapshot_ts": "2026-08-12 15:15:00", "trading_date": "2026-08-12"}, {"strike_price": 25400.0, "option_type": "PE", "open_interest": 525956, "classification": "Short Buildup", "symbol": "NIFTY", "snapshot_ts": "2026-08-12 15:15:00", "trading_date": "2026-08-12"}, {"strike_price": 25450.0, "option_type": "CE", "open_interest": 1033978, "classification": "Short Covering", "symbol": "NIFTY", "snapshot_ts": "2026-08-12 15:15:00", "trading_date": "2026-08-12"}, {"strike_price": 25450.0, "option_type": "PE", "open_interest": 1249423, "classification": "Short Buildup", "symbol": "NIFTY", "snapshot_ts": "2026-08-12 15:15:00", "trading_date": "2026-08-12"}, {"strike_price": 25500.0, "option_type": "CE", "open_interest": 1260263, "classification": "Short Covering", "symbol": "NIFTY", "snapshot_ts": "2026-08-12 15:15:00", "trading_date": "2026-08-12"}, {"strike_price": 25500.0, "option_type": "PE", "open_interest": 1282272, "classification": "Long Unwinding", "symbol": "NIFTY", "snapshot_ts": "2026-08-12 15:15:00", "trading_date": "2026-08-12"}, {"strike_price": 25550.0, "option_type": "CE", "open_interest": 1199518, "classification": "Short Buildup", "symbol": "NIFTY", "snapshot_ts": "2026-08-12 15:15:00", "trading_date": "2026-08-12"}, {"strike_price": 25550.0, "option_type": "PE", "open_interest": 449594, "classification": "Long Unwinding", "symbol": "NIFTY", "snapshot_ts": "2026-08-12 15:15:00", "trading_date": "2026-08-12"}, {"strike_price": 25600.0, "option_type": "CE", "open_interest": 1799180, "classification": "Short Buildup", "symbol": "NIFTY", "snapshot_ts": "2026-08-12 15:15:00", "trading_date": "2026-08-12"}, {"strike_price": 25600.0, "option_type": "PE", "open_interest": 1244376, "classification": "Short Buildup", "symbol": "NIFTY", "snapshot_ts": "2026-08-12 15:15:00", "trading_date": "2026-08-12"}, {"strike_price": 25650.0, "option_type": "CE", "open_interest": 1572455, "classification": "Short Buildup", "symbol": "NIFTY", "snapshot_ts": "2026-08-12 15:15:00", "trading_date": "2026-08-12"}, {"strike_price": 25650.0, "option_type": "PE", "open_interest": 1458888, "classification": "Long Unwinding", "symbol": "NIFTY", "snapshot_ts": "2026-08-12 15:15:00", "trading_date": "2026-08-12"}, {"strike_price": 25700.0, "option_type": "CE", "open_interest": 838849, "classification": "Long Unwinding", "symbol": "NIFTY", "snapshot_ts": "2026-08-12 15:15:00", "trading_date": "2026-08-12"}, {"strike_price": 25700.0, "option_type": "PE", "open_interest": 492737, "classification": "Short Buildup", "symbol": "NIFTY", "snapshot_ts": "2026-08-12 15:15:00", "trading_date": "2026-08-12"}, {"strike_price": 25750.0, "option_type": "CE", "open_interest": 1406920, "classification": "Short Buildup", "symbol": "NIFTY", "snapshot_ts": "2026-08-12 15:15:00", "trading_date": "2026-08-12"}, {"strike_price": 25750.0, "option_type": "PE", "open_interest": 998944, "classification": "Short Buildup", "symbol": "NIFTY", "snapshot_ts": "2026-08-12 15:15:00", "trading_date": "2026-08-12"}, {"strike_price": 25800.0, "option_type": "CE", "open_interest": 515722, "classification": "Long Unwinding", "symbol": "NIFTY", "snapshot_ts": "2026-08-12 15:15:00", "trading_date": "2026-08-12"}, {"strike_price": 25800.0, "option_type": "PE", "open_interest": 777713, "classification": "Short Buildup", "symbol": "NIFTY", "snapshot_ts": "2026-08-12 15:15:00", "trading_date": "2026-08-12"}, {"strike_price": 25850.0, "option_type": "CE", "open_interest": 636892, "classification": "Long Unwinding", "symbol": "NIFTY", "snapshot_ts": "2026-08-12 15:15:00", "trading_date": "2026-08-12"}, {"strike_price": 25850.0, "option_type": "PE", "open_interest": 423083, "classification": "Long Unwinding", "symbol": "NIFTY", "snapshot_ts": "2026-08-12 15:15:00", "trading_date": "2026-08-12"}, {"strike_price": 25900.0, "option_type": "CE", "open_interest": 306578, "classification": "Long Unwinding", "symbol": "NIFTY", "snapshot_ts": "2026-08-12 15:15:00", "trading_date": "2026-08-12"}, {"strike_price": 25900.0, "option_type": "PE", "open_interest": 481812, "classification": "Long Unwinding", "symbol": "NIFTY", "snapshot_ts": "2026-08-12 15:15:00", "trading_date": "2026-08-12"}, {"strike_price": 25950.0, "option_type": "CE", "open_interest": 373116, "classification": "Long Unwinding", "symbol": "NIFTY", "snapshot_ts": "2026-08-12 15:15:00", "trading_date": "2026-08-12"}, {"strike_price": 25950.0, "option_type": "PE", "open_interest": 337356, "classification": "Short Buildup", "symbol": "NIFTY", "snapshot_ts": "2026-08-12 15:15:00", "trading_date": "2026-08-12"}, {"strike_price": 26000.0, "option_type": "CE", "open_interest": 169971, "classification": "Long Unwinding", "symbol": "NIFTY", "snapshot_ts": "2026-08-12 15:15:00", "trading_date": "2026-08-12"}, {"strike_price": 26000.0, "option_type": "PE", "open_interest": 270192, "classification": "Short Buildup", "symbol": "NIFTY", "snapshot_ts": "2026-08-12 15:15:00", "trading_date": "2026-08-12"}, {"strike_price": 26050.0, "option_type": "CE", "open_interest": 446176, "classification": "Long Unwinding", "symbol": "NIFTY", "snapshot_ts": "2026-08-12 15:15:00", "trading_date": "2026-08-12"}, {"strike_price": 26050.0, "option_type": "PE", "open_interest": 882196, "classification": "Short Buildup", "symbol": "NIFTY", "snapshot_ts": "2026-08-12 15:15:00", "trading_date": "2026-08-12"}];
+
+Chart.defaults.color = '#8B98A8';
+Chart.defaults.font.family = "'IBM Plex Mono', monospace";
+Chart.defaults.font.size = 10.5;
+Chart.defaults.borderColor = '#1E2733';
+
+const latest = metrics[metrics.length - 1];
+document.getElementById('asof-ts').textContent = latest.snapshot_ts + ' UTC';
+
+const stats = [
+  {label:'Spot', value: latest.underlying_value.toLocaleString(undefined,{maximumFractionDigits:2})},
+  {label:'PCR (OI)', value: latest.pcr.toFixed(3), sub: latest.pcr > 1 ? 'put-heavy' : 'call-heavy'},
+  {label:'Max Pain', value: latest.max_pain.toLocaleString()},
+  {label:'Dist. to Max Pain', value: (latest.distance_to_max_pain_pct>=0?'+':'')+latest.distance_to_max_pain_pct+'%',
+    cls: latest.distance_to_max_pain_pct>=0?'pos':'neg'},
+  {label:'IV Skew (OTM P−C)', value: (latest.skew_pts>=0?'+':'')+latest.skew_pts+' pt',
+    sub: latest.skew_pts>0 ? 'fear premium' : 'call demand', cls: latest.skew_pts>0?'neg':'pos'},
+];
+document.getElementById('stat-row').innerHTML = stats.map(s => `
+  <div class="stat">
+    <div class="label">${s.label}</div>
+    <div class="value ${s.cls||''}">${s.value}</div>
+    ${s.sub? `<div class="sub">${s.sub}</div>`:''}
+  </div>`).join('');
+
+const labels = metrics.map(m => m.snapshot_ts.split(' ')[1] || m.snapshot_ts);
+
+new Chart(document.getElementById('spotChart'), {
+  type:'line',
+  data:{ labels, datasets:[
+    { label:'Spot', data: metrics.map(m=>m.underlying_value), borderColor:'#E7ECF2', backgroundColor:'transparent', tension:.25, pointRadius:0, borderWidth:2},
+    { label:'Max Pain', data: metrics.map(m=>m.max_pain), borderColor:'#4FC9C0', backgroundColor:'transparent', borderDash:[4,3], tension:0, pointRadius:0, borderWidth:1.5},
+  ]},
+  options:{ responsive:true, maintainAspectRatio:false,
+    plugins:{ legend:{ labels:{boxWidth:10, boxHeight:10}}},
+    scales:{ x:{ grid:{color:'#171E28'}}, y:{ grid:{color:'#171E28'}} } }
+});
+
+new Chart(document.getElementById('pcrChart'), {
+  type:'line',
+  data:{ labels, datasets:[
+    { label:'PCR', data: metrics.map(m=>m.pcr), borderColor:'#E8A857', backgroundColor:'transparent', tension:.25, pointRadius:0, borderWidth:2, yAxisID:'y'},
+    { label:'Skew (pts)', data: metrics.map(m=>m.skew_pts), borderColor:'#E8677A', backgroundColor:'transparent', tension:.25, pointRadius:0, borderWidth:1.5, yAxisID:'y1'},
+  ]},
+  options:{ responsive:true, maintainAspectRatio:false,
+    plugins:{ legend:{ labels:{boxWidth:10, boxHeight:10}}},
+    scales:{
+      x:{ grid:{color:'#171E28'}},
+      y:{ position:'left', grid:{color:'#171E28'}, title:{display:true,text:'PCR'} },
+      y1:{ position:'right', grid:{display:false}, title:{display:true,text:'skew pts'} },
+    } }
+});
+
+const cls2css = c => 'b-' + c.toLowerCase().replace(/ /g,'-');
+document.getElementById('buildup-body').innerHTML = buildup
+  .sort((a,b)=>a.strike_price-b.strike_price)
+  .map(r => `
+    <tr>
+      <td>${r.strike_price}</td>
+      <td style="color:${r.option_type==='CE'?'var(--call)':'var(--put)'}">${r.option_type}</td>
+      <td>${r.open_interest.toLocaleString()}</td>
+      <td><span class="badge ${cls2css(r.classification)}">${r.classification}</span></td>
+    </tr>`).join('');
+</script>
+</body>
+</html>

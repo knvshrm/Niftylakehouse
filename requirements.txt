@@ -1,0 +1,12 @@
+deltalake>=0.18
+duckdb>=1.0
+pandas>=2.0
+pyarrow>=15.0
+numpy>=1.26
+requests>=2.31
+jugaad-data>=0.35
+tzdata>=2024.1  # needed on Windows for zoneinfo("Asia/Kolkata") to resolve
+
+# Optional — only needed if you want to actually run/deploy the Airflow DAG
+# in orchestration/. Not required for the demo or for pulling live data.
+# apache-airflow>=2.9

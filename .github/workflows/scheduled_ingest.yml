@@ -1,0 +1,71 @@
+# Fully automated, cloud-based ingestion — this runs on GitHub's servers,
+# NOT your computer. Your laptop can be off and this still runs.
+#
+# HOW TO ENABLE THIS (one-time setup, ~5 minutes):
+#   1. Create a GitHub account if you don't have one (github.com — free).
+#   2. Create a new repository (can be private) and push this whole
+#      project folder into it:
+#        git init
+#        git add .
+#        git commit -m "initial commit"
+#        git branch -M main
+#        git remote add origin https://github.com/<your-username>/<repo-name>.git
+#        git push -u origin main
+#   3. That's it. GitHub automatically detects this file and starts running
+#      it on the schedule below. Check the "Actions" tab on your repo to
+#      see each run and its logs.
+#
+# WHAT IT DOES each run:
+#   - Spins up a fresh cloud machine
+#   - Installs dependencies
+#   - Fetches one live NSE snapshot
+#   - Rebuilds bronze -> silver -> gold
+#   - Commits the updated data files back into your repo
+#
+# HONEST CAVEAT: NSE sometimes blocks requests from cloud-provider IP
+# ranges (like GitHub's) even with jugaad-data's session handling, since
+# they're recognizable as "not a home internet connection." If runs start
+# failing, check the Actions tab logs — if it's consistently blocked from
+# GitHub's IPs, fall back to scheduler.py running on your own machine
+# instead, which uses your normal home/office internet connection.
+
+name: Scheduled NSE Ingestion
+
+on:
+  schedule:
+    # Every 15 min, 9:15 AM - 3:30 PM IST (= 3:45 AM - 10:00 AM UTC), Mon-Fri.
+    # Cron is in UTC. This is approximate at the open/close edges — fine
+    # for this purpose, not for anything requiring millisecond precision.
+    - cron: "0,15,30,45 3-9 * * 1-5"
+    - cron: "0 10 * * 1-5"
+  workflow_dispatch: {}  # lets you also trigger a run manually from the Actions tab
+
+permissions:
+  contents: write  # needed so the workflow can commit data back to the repo
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Fetch live snapshot + rebuild pipeline
+        run: |
+          python3 ingestion/nse_option_chain_client.py NIFTY
+          python3 run_pipeline.py
+          cd dashboard && python3 export_gold_json.py
+
+      - name: Commit updated data
+        run: |
+          git config user.name "nse-lakehouse-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add data/ dashboard/snapshot_metrics.json dashboard/oi_buildup_latest.json
+          git diff --cached --quiet || git commit -m "Automated data refresh $(date -u +'%Y-%m-%d %H:%M UTC')"
+          git push
