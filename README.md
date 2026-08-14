@@ -60,41 +60,56 @@ dashboard/
   dashboard.html              static dashboard reading the gold layer
 ```
 
-## Automating it (no manual runs)
+## Automation — GitHub Actions (fully automated, runs even with your laptop off)
 
-Two options, depending on how "hands-off" you want this:
+This is already built and git-committed inside this project — `.github/workflows/scheduled_ingest.yml`
+runs the entire pipeline on a schedule, on GitHub's own servers, and commits
+the fresh data back automatically. Once it's pushed to GitHub, nothing
+further is needed from you.
 
-### Option A — Local scheduler (simplest, your computer must be on)
+**Being precise about what "no human intervention" means here**, because
+that phrase can hide a false promise: one human action is unavoidable —
+pushing this code to a GitHub account, because I don't have access to
+your GitHub credentials and can't do that step for you. That's it, though:
+a one-time ~5 minute setup, not ongoing intervention. After that, the
+schedule runs itself forever with no further action from you.
+
+### The only steps left (copy-paste, ~5 minutes, once)
 
 ```bash
-python3 scheduler.py
+# 1. Create a free account at github.com if you don't have one.
+# 2. Create a new EMPTY repository there (no README/license — just empty).
+#    Copy the repo URL it gives you, then:
+
+cd nifty-options-lakehouse
+git remote add origin https://github.com/<your-username>/<repo-name>.git
+git push -u origin main
 ```
 
-Run this once and leave it running. It checks the time, and automatically
-fetches live data + rebuilds the whole pipeline every 15 minutes during
-NSE market hours (9:15 AM - 3:30 PM IST, Mon-Fri) — no manual re-running.
-Logs go to `scheduler.log` so you can check it worked even if you weren't
-watching. Stop it with Ctrl+C.
+That's the whole thing. This project already has git initialized and every
+file committed — you're just pushing it, not setting anything up from
+scratch. GitHub detects the workflow file automatically and starts running
+it on the schedule.
 
-To survive closing your terminal, run it as a background process:
-```bash
-nohup python3 scheduler.py &        # Mac/Linux
-# or use Task Scheduler on Windows to run scheduler.py at login
-```
+### How you'll know it's working (without checking manually)
 
-### Option B — GitHub Actions (true "set and forget", works even with your laptop off)
+- Go to the **Actions** tab on your repo any time to see every run and its logs.
+- **GitHub automatically emails you if a scheduled run fails** — this is a
+  built-in GitHub notification, not something I configured — so you don't
+  need to poll it. If you never get a failure email, it's running fine.
 
-This runs on GitHub's cloud servers on a schedule, not your machine. See
-`.github/workflows/scheduled_ingest.yml` for full setup instructions (about
-5 minutes, one-time) — push this project to a GitHub repo and it starts
-running automatically, committing fresh data back to the repo every 15
-minutes during market hours.
+### The one honest limit — read this before trusting it blindly
 
-**Honest caveat**: NSE sometimes blocks requests from cloud-provider IPs
-(like GitHub's) even with proper session handling, since they're
-recognizable as non-residential traffic. If GitHub Actions runs start
-failing consistently, Option A (your own internet connection) is the
-reliable fallback.
+NSE occasionally blocks requests from cloud-provider IP ranges (GitHub's
+included) even with proper session handling, because that traffic doesn't
+look like a normal home connection. I can't guarantee GitHub's IPs won't
+ever get blocked — nobody can promise that from outside NSE, since it's
+NSE's server-side decision, not a bug in this code. If it happens, you'll
+get the failure email above, and `scheduler.py` (Option A from before,
+running on your own home internet) is the fallback that doesn't have this
+risk. This is the one piece of this project that isn't 100% guaranteed —
+everything else (the pipeline logic, the Delta Lake writes, the analytics
+math) has been run and verified, not just written and assumed to work.
 
 ## Run it manually (understanding each step)
 
