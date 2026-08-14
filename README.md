@@ -98,6 +98,17 @@ it on the schedule.
   built-in GitHub notification, not something I configured — so you don't
   need to poll it. If you never get a failure email, it's running fine.
 
+**Important: which email that actually goes to.** The commit author
+identity set in this project's git config (visible if you run
+`git log`) is just metadata saying "who wrote this commit" — it is
+**not** connected to failure notifications in any way. The failure email
+goes to **whatever email is attached to your own GitHub account**
+(Settings → Emails on github.com), not anything from this project.
+Before trusting this fully, go check that email is one you actually read —
+GitHub → your profile photo → **Settings** → **Notifications** → confirm
+email notifications are on for Actions, and that the email listed under
+**Settings → Emails** is current.
+
 ### The one honest limit — read this before trusting it blindly
 
 NSE occasionally blocks requests from cloud-provider IP ranges (GitHub's
